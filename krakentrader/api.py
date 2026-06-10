@@ -1,5 +1,13 @@
 import requests
 import time
+import urllib.parse
+import hashlib
+import hmac
+import base64
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 def get_historical_ohlcv(pair):
     """
@@ -35,6 +43,33 @@ def get_historical_ohlcv(pair):
             
     return []
 
+def get_tradable_pairs(quote_currencies):
+    url = "https://api.kraken.com/0/public/AssetPairs"
+    response = requests.get(url)
+    response.raise_for_status()
+    data = response.json()
+    if data.get('error'):
+        raise Exception(f"Kraken API error: {data['error']}")
+    
+    pairs = {}
+    for pair_name, info in data['result'].items():
+        quote_asset = info.get('quote')
+        if quote_asset in quote_currencies:
+            pairs[pair_name] = quote_asset
+    return pairs
+
+def get_ticker(pair):
+    url = f"https://api.kraken.com/0/public/Ticker?pair={pair}"
+    response = requests.get(url)
+    response.raise_for_status()
+    data = response.json()
+    if data.get('error'):
+        raise Exception(f"Kraken API error: {data['error']}")
+        
+    for key, info in data['result'].items():
+        return float(info['c'][0])
+    return None
+
 def calculate_fee(trade_size, is_maker=False):
     """
     Calculate explicit fee for the given trade_size.
@@ -44,3 +79,51 @@ def calculate_fee(trade_size, is_maker=False):
         raise ValueError("Trade size cannot be negative")
     fee_rate = 0.0025 if is_maker else 0.0040
     return trade_size * fee_rate
+
+def get_kraken_signature(urlpath, data, secret):
+    postdata = urllib.parse.urlencode(data)
+    encoded = (str(data['nonce']) + postdata).encode()
+    message = urlpath.encode() + hashlib.sha256(encoded).digest()
+    mac = hmac.new(base64.b64decode(secret), message, hashlib.sha512)
+    sigdigest = base64.b64encode(mac.digest())
+    return sigdigest.decode()
+
+def private_request(endpoint, data=None):
+    if data is None:
+        data = {}
+        
+    api_key = os.getenv("KRAKEN_API_KEY")
+    api_secret = os.getenv("KRAKEN_API_SECRET")
+    
+    if not api_key or not api_secret:
+        raise ValueError("KRAKEN_API_KEY and KRAKEN_API_SECRET must be set in .env")
+        
+    urlpath = f'/0/private/{endpoint}'
+    url = f'https://api.kraken.com{urlpath}'
+    
+    data['nonce'] = str(int(1000 * time.time()))
+    headers = {
+        'API-Key': api_key,
+        'API-Sign': get_kraken_signature(urlpath, data, api_secret)
+    }
+    
+    response = requests.post(url, headers=headers, data=data)
+    response.raise_for_status()
+    res_data = response.json()
+    if res_data.get('error'):
+        raise Exception(f"Kraken private API error: {res_data['error']}")
+    return res_data.get('result', {})
+
+def get_balance():
+    return private_request('Balance')
+
+def create_order(pair, type, ordertype, volume, price=None):
+    data = {
+        'pair': pair,
+        'type': type,  # 'buy' or 'sell'
+        'ordertype': ordertype, # 'market' or 'limit'
+        'volume': str(volume)
+    }
+    if price is not None:
+        data['price'] = str(price)
+    return private_request('AddOrder', data)
