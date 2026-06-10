@@ -101,7 +101,8 @@ def run_loop():
             if len(open_positions) < MAX_CONCURRENT_TRADES:
                 try:
                     balances = get_balance()
-                except:
+                except Exception as e:
+                    logging.error(f"Failed to fetch balances (Check API keys!): {e}")
                     balances = {}
                     
                 usable_assets = []
@@ -110,6 +111,9 @@ def run_loop():
                     usd_val = get_usd_value(asset, amount)
                     if usd_val >= MIN_TRADE_AMOUNT_USD:
                         usable_assets.append({'asset': asset, 'amount': amount, 'usd_val': usd_val})
+                        
+                if not usable_assets:
+                    logging.info("No usable assets found (wallet is empty or balances < $5). Waiting...")
                 
                 # STEP 3: MARKET RESEARCH
                 if usable_assets:
