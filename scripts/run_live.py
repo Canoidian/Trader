@@ -53,6 +53,19 @@ def get_usd_value(asset, amount):
         pass
     return 0.0
 
+def consolidate_fiat(balances):
+    # Automatically convert Euro dust to USD if it meets Kraken's 4 EUR minimum
+    eur_balance = float(balances.get('ZEUR', balances.get('EUR', 0.0)))
+    if eur_balance >= 4.0:
+        logging.info(f"Auto-Consolidating {eur_balance:.2f} EUR into USD...")
+        try:
+            res = create_order('ZEURZUSD', 'sell', 'market', eur_balance)
+            logging.info(f"Consolidation Success: {res}")
+            return True
+        except Exception as e:
+            logging.error(f"Failed to consolidate EUR: {e}")
+    return False
+
 def run_loop():
     logging.info("Starting Multi-Asset Portfolio Trading Loop...")
     open_positions = load_state()  
@@ -113,7 +126,12 @@ def run_loop():
                         usable_assets.append({'asset': asset, 'amount': amount, 'usd_val': usd_val})
                         
                 if not usable_assets:
-                    logging.info("No usable assets found (wallet is empty or balances < $5). Waiting...")
+                    logging.info("No usable assets found (wallet is empty or balances < $5). Attempting auto-consolidation...")
+                    if consolidate_fiat(balances):
+                        time.sleep(5)  # Let balances settle on Kraken's servers
+                        continue       # Restart loop to fetch new USD balance
+                    else:
+                        logging.info("Consolidation not possible or failed. Waiting...")
                 
                 # STEP 3: MARKET RESEARCH
                 if usable_assets:
