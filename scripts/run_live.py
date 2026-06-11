@@ -70,6 +70,9 @@ def run_loop():
     logging.info("Starting Multi-Asset Portfolio Trading Loop...")
     open_positions = load_state()  
     
+    if not os.path.exists(os.path.join(os.path.dirname(STATE_FILE), 'model.pkl')):
+        logging.warning("No ML model (model.pkl) found! The bot will use the naive fallback algorithm which is very conservative and may not buy anything. Run krakentrader/ml_trainer.py to train the AI!")
+        
     while True:
         try:
             # STEP 1: MONITOR & SELL
@@ -160,13 +163,13 @@ def run_loop():
                             except:
                                 pass
                                 
-                        if best_score > 10 and best_quote_asset:
+                        if best_score > 65.0 and best_quote_asset:
                             # STEP 4: BUY
                             asset_info = next(a for a in usable_assets if a['asset'] == best_quote_asset)
                             trade_amount = asset_info['amount'] * TRADE_FRACTION
                             volume = trade_amount / best_price
                             
-                            logging.info(f"[BUY] Score {best_score:.2f}. Using {trade_amount:.6f} {best_quote_asset} to buy {best_pair}")
+                            logging.info(f"[BUY] ML Predicts {best_score:.1f}% pump probability! Using {trade_amount:.6f} {best_quote_asset} to buy {best_pair}")
                             try:
                                 create_order(best_pair, 'buy', 'market', volume)
                                 open_positions.append({

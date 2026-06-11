@@ -1,5 +1,22 @@
 import math
 import statistics
+import os
+try:
+    import joblib
+except ImportError:
+    pass
+
+MODEL_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'model.pkl')
+_model_cache = None
+
+def load_model():
+    global _model_cache
+    if _model_cache is None and os.path.exists(MODEL_PATH):
+        try:
+            _model_cache = joblib.load(MODEL_PATH)
+        except Exception:
+            pass
+    return _model_cache
 
 def calculate_sma(closes, period):
     if period <= 0:
@@ -56,29 +73,46 @@ def calculate_volatility(closes):
 def calculate_composite_score(closes):
     """
     Returns a composite score for ranking. Higher is better.
-    We'll use a simple heuristic:
-    - Favorable if price is above SMA(14)
-    - RSI near 40-60 is neutral, < 30 is oversold (good for buying), > 70 is overbought (bad)
-    - Volatility adjustment: penalize high volatility slightly
+    If the ML model is trained, it returns a probability (0.0 to 1.0) scaled up to 100.
+    Otherwise, it falls back to the naive heuristic.
     """
-    if len(closes) < 15:
+    if len(closes) < 31:
         return 0.0
         
+    model = load_model()
+    if model is not None:
+        # ML Scoring Path
+        current_price = closes[-1]
+        slice_14 = closes[-14:]
+        slice_30 = closes[-30:]
+        
+        sma_14 = calculate_sma(slice_14, 14)
+        sma_30 = calculate_sma(slice_30, 30)
+        rsi = calculate_rsi(slice_14, 14)
+        volat = calculate_volatility(slice_14)
+        
+        if sma_14 and sma_30 and rsi:
+            sma_14_diff = (current_price - sma_14) / sma_14
+            sma_30_diff = (current_price - sma_30) / sma_30
+            features = [[sma_14_diff, sma_30_diff, rsi, volat]]
+            
+            # Predict probability of class 1 (pump)
+            prob = model.predict_proba(features)[0][1]
+            return prob * 100.0  # Scale to 0-100 so it works with the old run_live threshold conceptually, though we'll update run_live
+            
+    # Fallback Path (Naive)
     sma14 = calculate_sma(closes, 14)
     rsi14 = calculate_rsi(closes, 14)
     volatility = calculate_volatility(closes)
     
     current_price = closes[-1]
-    
     score = 0.0
     
-    # Trend component
     if sma14 is not None and current_price > sma14:
         score += 5.0
     else:
         score -= 5.0
         
-    # RSI component
     if rsi14 is not None:
         if rsi14 < 30:
             score += 10.0
@@ -87,7 +121,5 @@ def calculate_composite_score(closes):
         else:
             score += 10.0 - ((rsi14 - 30) / 40.0) * 20.0
             
-    # Volatility penalty
     score -= volatility * 100.0
-    
     return score
