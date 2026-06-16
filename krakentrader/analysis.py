@@ -1,4 +1,5 @@
 import math
+import logging
 import statistics
 import os
 try:
@@ -14,8 +15,8 @@ def load_model():
     if _model_cache is None and os.path.exists(MODEL_PATH):
         try:
             _model_cache = joblib.load(MODEL_PATH)
-        except Exception:
-            pass
+        except Exception as e:
+            logging.warning(f"Failed to load model: {e}")
     return _model_cache
 
 def calculate_sma(closes, period):

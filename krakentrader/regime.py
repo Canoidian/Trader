@@ -1,6 +1,8 @@
 import time
 import logging
 
+from krakentrader.analysis import calculate_sma
+
 _regime_cache = None
 _regime_cache_time = 0.0
 _CACHE_TTL = 600  # 10 minutes
@@ -83,7 +85,6 @@ def get_market_regime(api):
         if adx is None:
             return 'SIDEWAYS', 65.0
 
-        from krakentrader.analysis import calculate_sma
         sma200 = calculate_sma(closes, 200)
         if sma200 is None:
             return 'SIDEWAYS', 65.0

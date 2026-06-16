@@ -177,17 +177,8 @@ def run_loop():
                                 volumes = [float(row[6]) for row in ohlcv]
                                 vwaps = [float(row[5]) for row in ohlcv]
 
-                                closes_5m, closes_15m = None, None
-                                try:
-                                    ohlcv_5m = get_historical_ohlcv_interval(pair, 5)
-                                    closes_5m = [float(r[4]) for r in ohlcv_5m] if ohlcv_5m else None
-                                except Exception:
-                                    pass
-                                try:
-                                    ohlcv_15m = get_historical_ohlcv_interval(pair, 15)
-                                    closes_15m = [float(r[4]) for r in ohlcv_15m] if ohlcv_15m else None
-                                except Exception:
-                                    pass
+                                closes_5m = closes[::5] if len(closes) >= 5 else None
+                                closes_15m = closes[::15] if len(closes) >= 15 else None
 
                                 score = calculate_composite_score(
                                     closes, highs=highs, lows=lows,
@@ -201,8 +192,8 @@ def run_loop():
                                     best_quote_asset = tradable_pairs_dict[pair]
 
                                 time.sleep(0.05)
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                logging.warning(f"Scoring error for {pair}: {e}")
 
                         if best_score > buy_threshold and best_quote_asset:
                             # STEP 4: BUY
