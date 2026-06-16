@@ -114,3 +114,62 @@ def test_calculate_atr():
     assert abs(atr - 0.2) < 0.01
     # Too short
     assert calculate_atr([11.0]*5, [9.0]*5, [10.0]*5, period=14) is None
+
+from krakentrader.analysis import (
+    calculate_stoch_rsi, calculate_williams_r, calculate_roc,
+    calculate_obv_slope, calculate_vwap_diff, calculate_volume_ratio
+)
+
+def test_calculate_stoch_rsi():
+    # Need at least 14*2+3 = 31 bars
+    assert calculate_stoch_rsi([10.0] * 10) == (None, None)
+    # Steady uptrend → RSI high → StochRSI K near 100
+    closes_up = [10.0 + i * 0.1 for i in range(40)]
+    k, d = calculate_stoch_rsi(closes_up)
+    assert k is not None and d is not None
+    assert 0.0 <= k <= 100.0
+    assert 0.0 <= d <= 100.0
+
+def test_calculate_williams_r():
+    highs = [12.0] * 15
+    lows = [8.0] * 15
+    closes = [10.0] * 15
+    # At midpoint: %R = (12-10)/(12-8)*-100 = -50
+    wr = calculate_williams_r(highs, lows, closes)
+    assert abs(wr - (-50.0)) < 0.001
+    # Too short
+    assert calculate_williams_r([12.0]*5, [8.0]*5, [10.0]*5, period=14) is None
+
+def test_calculate_roc():
+    # 10% increase: last bar is 11.0, value 5 bars ago is 10.0
+    closes = [10.0] * 6 + [11.0] * 5
+    roc = calculate_roc(closes, period=5)
+    assert abs(roc - 0.10) < 0.001
+    # Too short
+    assert calculate_roc([10.0] * 3, period=5) is None
+
+def test_calculate_obv_slope():
+    # Uptrend with volume: OBV increases → positive slope
+    closes = [10.0 + i * 0.5 for i in range(12)]
+    volumes = [100.0] * 12
+    slope = calculate_obv_slope(closes, volumes, lookback=10)
+    assert slope is not None
+    assert slope > 0
+    # Too short
+    assert calculate_obv_slope([10.0]*3, [100.0]*3, lookback=10) is None
+
+def test_calculate_vwap_diff():
+    # Price = VWAP → diff = 0
+    closes = [10.0] * 5
+    vwaps = [10.0] * 5
+    assert calculate_vwap_diff(closes, vwaps) == 0.0
+    # Price 10% above VWAP
+    assert abs(calculate_vwap_diff([11.0]*5, [10.0]*5) - 0.1) < 0.001
+
+def test_calculate_volume_ratio():
+    # Last bar is 2× average of prior 14 bars
+    volumes = [100.0] * 14 + [200.0]
+    ratio = calculate_volume_ratio(volumes)
+    assert abs(ratio - 2.0) < 0.001
+    # Too short
+    assert calculate_volume_ratio([100.0] * 5) is None

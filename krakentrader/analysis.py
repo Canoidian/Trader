@@ -148,6 +148,81 @@ def calculate_atr(highs, lows, closes, period=14):
         return 0.0
     return atr / closes[-1]
 
+def _rsi_series(closes, period, count):
+    result = []
+    for i in range(count):
+        end = len(closes) - (count - 1 - i)
+        lookback_start = max(0, end - period * 4)
+        r = calculate_rsi(closes[lookback_start:end], period)
+        if r is not None:
+            result.append(r)
+    return result
+
+def calculate_stoch_rsi(closes, period=14):
+    if len(closes) < period * 2 + 3:
+        return None, None
+    rsi_vals = _rsi_series(closes, period, period + 3)
+    if len(rsi_vals) < period + 3:
+        return None, None
+    k_vals = []
+    for i in range(3):
+        window = rsi_vals[i: i + period]
+        lo, hi = min(window), max(window)
+        curr = rsi_vals[i + period]
+        if hi == lo:
+            k_vals.append(50.0)
+        else:
+            k_vals.append((curr - lo) / (hi - lo) * 100.0)
+    return k_vals[-1], sum(k_vals) / 3
+
+def calculate_williams_r(highs, lows, closes, period=14):
+    if len(closes) < period:
+        return None
+    h = max(highs[-period:])
+    l = min(lows[-period:])
+    if h == l:
+        return -50.0
+    return (h - closes[-1]) / (h - l) * -100.0
+
+def calculate_roc(closes, period=10):
+    if len(closes) < period + 1:
+        return None
+    prev = closes[-period - 1]
+    if prev == 0:
+        return 0.0
+    return (closes[-1] - prev) / prev
+
+def calculate_obv_slope(closes, volumes, lookback=10):
+    if len(closes) < lookback + 1 or len(volumes) < lookback + 1:
+        return None
+    obv = 0.0
+    obv_series = [0.0]
+    for i in range(1, len(closes)):
+        if closes[i] > closes[i - 1]:
+            obv += volumes[i]
+        elif closes[i] < closes[i - 1]:
+            obv -= volumes[i]
+        obv_series.append(obv)
+    window = obv_series[-lookback:]
+    n = len(window)
+    return (window[-1] - window[0]) / (n - 1) if n > 1 else 0.0
+
+def calculate_vwap_diff(closes, vwaps):
+    if not closes or not vwaps:
+        return 0.0
+    vwap = vwaps[-1]
+    if vwap == 0:
+        return 0.0
+    return (closes[-1] - vwap) / vwap
+
+def calculate_volume_ratio(volumes, period=14):
+    if len(volumes) < period + 1:
+        return None
+    avg = sum(volumes[-period - 1:-1]) / period
+    if avg == 0:
+        return 1.0
+    return volumes[-1] / avg
+
 def calculate_composite_score(closes):
     """
     Returns a composite score for ranking. Higher is better.
