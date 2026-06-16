@@ -285,15 +285,27 @@ def calculate_composite_score(closes, highs=None, lows=None, volumes=None,
         if closes_15m and len(closes_15m) >= 28:
             rsi_15m = _safe(calculate_rsi(closes_15m[-28:], 14), 50.0)
 
-        features = [[
+        FEATURE_NAMES = [
+            'sma14_diff', 'sma30_diff', 'ema21_diff', 'ema50_diff',
+            'rsi14', 'stoch_k', 'stoch_d', 'williams_r', 'roc10',
+            'macd_line', 'macd_signal', 'macd_hist',
+            'bb_pct_b', 'bb_width', 'atr_norm',
+            'obv_slope', 'vwap_diff', 'volume_ratio',
+            'volatility', 'rsi_5m', 'sma20_diff_5m', 'rsi_15m'
+        ]
+        row = [
             sma14_diff, sma30_diff, ema21_diff, ema50_diff,
             rsi14, stoch_k, stoch_d, willi, roc10,
             _safe(macd_line, 0.0), _safe(macd_sig, 0.0), _safe(macd_hist, 0.0),
             bb_b, bb_w, atr_norm,
             obv_sl, vwap_d, vol_r,
-            volat,
-            rsi_5m, sma20_diff_5m, rsi_15m
-        ]]
+            volat, rsi_5m, sma20_diff_5m, rsi_15m
+        ]
+        try:
+            import pandas as pd
+            features = pd.DataFrame([row], columns=FEATURE_NAMES)
+        except ImportError:
+            features = [row]
 
         prob = model.predict_proba(features)[0][1]
         return prob * 100.0
