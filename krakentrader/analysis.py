@@ -70,6 +70,84 @@ def calculate_volatility(closes):
         return 0.0
     return statistics.stdev(returns)
 
+def calculate_ema(closes, period):
+    if period <= 0 or len(closes) < period:
+        return None
+    k = 2.0 / (period + 1)
+    ema = sum(closes[:period]) / period
+    for price in closes[period:]:
+        ema = price * k + ema * (1 - k)
+    return ema
+
+def calculate_macd(closes):
+    if len(closes) < 35:
+        return None, None, None
+    k12 = 2.0 / 13
+    k26 = 2.0 / 27
+    k9 = 2.0 / 10
+    ema12 = sum(closes[:12]) / 12
+    ema26 = sum(closes[:26]) / 26
+    for price in closes[12:26]:
+        ema12 = price * k12 + ema12 * (1 - k12)
+    macd_series = []
+    for price in closes[26:]:
+        ema12 = price * k12 + ema12 * (1 - k12)
+        ema26 = price * k26 + ema26 * (1 - k26)
+        macd_series.append(ema12 - ema26)
+    if len(macd_series) < 9:
+        return None, None, None
+    signal = sum(macd_series[:9]) / 9
+    for m in macd_series[9:]:
+        signal = m * k9 + signal * (1 - k9)
+    macd_line = macd_series[-1]
+    return macd_line, signal, macd_line - signal
+
+def calculate_bollinger_bands(closes, period=20, num_std=2):
+    if len(closes) < period:
+        return None, None, None
+    window = closes[-period:]
+    middle = sum(window) / period
+    variance = sum((x - middle) ** 2 for x in window) / period
+    std = variance ** 0.5
+    return middle + num_std * std, middle, middle - num_std * std
+
+def calculate_bb_pct_b(closes, period=20):
+    result = calculate_bollinger_bands(closes, period)
+    if result == (None, None, None):
+        return None
+    upper, middle, lower = result
+    band_width = upper - lower
+    if band_width == 0:
+        return 0.5
+    return (closes[-1] - lower) / band_width
+
+def calculate_bb_width(closes, period=20):
+    result = calculate_bollinger_bands(closes, period)
+    if result == (None, None, None):
+        return None
+    upper, middle, lower = result
+    if middle == 0:
+        return 0.0
+    return (upper - lower) / middle
+
+def calculate_atr(highs, lows, closes, period=14):
+    if len(closes) < period + 1:
+        return None
+    true_ranges = []
+    for i in range(1, len(closes)):
+        tr = max(
+            highs[i] - lows[i],
+            abs(highs[i] - closes[i - 1]),
+            abs(lows[i] - closes[i - 1])
+        )
+        true_ranges.append(tr)
+    if len(true_ranges) < period:
+        return None
+    atr = sum(true_ranges[-period:]) / period
+    if closes[-1] == 0:
+        return 0.0
+    return atr / closes[-1]
+
 def calculate_composite_score(closes):
     """
     Returns a composite score for ranking. Higher is better.
