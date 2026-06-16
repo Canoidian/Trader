@@ -43,6 +43,37 @@ def get_historical_ohlcv(pair):
             
     return []
 
+def get_historical_ohlcv_interval(pair, interval=1):
+    """
+    Fetch historical OHLC data at a specific interval (in minutes).
+    interval: 1, 5, 15, 30, 60, 240, 1440
+    Returns list of [time, open, high, low, close, vwap, volume, count].
+    """
+    url = f"https://api.kraken.com/0/public/OHLC?pair={pair}&interval={interval}"
+
+    for attempt in range(3):
+        response = requests.get(url)
+        if response.status_code == 429:
+            time.sleep(1 * (2 ** attempt))
+            continue
+        response.raise_for_status()
+        data = response.json()
+        if any("Rate limit" in str(err) for err in data.get('error', [])):
+            time.sleep(1 * (2 ** attempt))
+            continue
+        break
+    else:
+        raise Exception("Kraken API rate limit exceeded after 3 attempts.")
+
+    if data.get('error'):
+        raise Exception(f"Kraken API error: {data['error']}")
+
+    for key in data['result'].keys():
+        if key != 'last':
+            return data['result'][key]
+
+    return []
+
 def get_tradable_pairs(quote_currencies):
     url = "https://api.kraken.com/0/public/AssetPairs"
     response = requests.get(url)
