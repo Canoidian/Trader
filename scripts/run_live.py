@@ -11,7 +11,7 @@ STATE_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file
 import krakentrader.api as _kraken_api
 from krakentrader.api import (
     get_balance, create_order, get_historical_ohlcv,
-    get_historical_ohlcv_interval, get_tradable_pairs, get_ticker
+    get_tradable_pairs, get_ticker
 )
 from krakentrader.analysis import calculate_composite_score
 from krakentrader.regime import get_market_regime
