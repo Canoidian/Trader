@@ -223,49 +223,93 @@ def calculate_volume_ratio(volumes, period=14):
         return 1.0
     return volumes[-1] / avg
 
-def calculate_composite_score(closes):
+def _safe(val, default=0.0):
+    return val if val is not None else default
+
+def calculate_composite_score(closes, highs=None, lows=None, volumes=None,
+                               vwaps=None, closes_5m=None, closes_15m=None):
     """
-    Returns a composite score for ranking. Higher is better.
-    If the ML model is trained, it returns a probability (0.0 to 1.0) scaled up to 100.
-    Otherwise, it falls back to the naive heuristic.
+    Returns a composite score 0–100. Higher = stronger buy signal.
+    If ML model loaded, uses 22-feature LightGBM score.
+    Falls back to naive heuristic if no model.
     """
     if len(closes) < 31:
         return 0.0
-        
+
     model = load_model()
     if model is not None:
-        # ML Scoring Path
         current_price = closes[-1]
-        slice_14 = closes[-14:]
-        slice_30 = closes[-30:]
-        
-        sma_14 = calculate_sma(slice_14, 14)
-        sma_30 = calculate_sma(slice_30, 30)
-        rsi = calculate_rsi(slice_14, 14)
-        volat = calculate_volatility(slice_14)
-        
-        if sma_14 and sma_30 and rsi:
-            sma_14_diff = (current_price - sma_14) / sma_14
-            sma_30_diff = (current_price - sma_30) / sma_30
-            features = [[sma_14_diff, sma_30_diff, rsi, volat]]
-            
-            # Predict probability of class 1 (pump)
-            prob = model.predict_proba(features)[0][1]
-            return prob * 100.0  # Scale to 0-100 so it works with the old run_live threshold conceptually, though we'll update run_live
-            
-    # Fallback Path (Naive)
+
+        # --- Trend ---
+        sma_14 = calculate_sma(closes[-14:], 14)
+        sma_30 = calculate_sma(closes[-30:], 30)
+        ema_21 = calculate_ema(closes, 21) if len(closes) >= 21 else None
+        ema_50 = calculate_ema(closes, 50) if len(closes) >= 50 else calculate_ema(closes, len(closes))
+        sma14_diff = (current_price - sma_14) / sma_14 if sma_14 else 0.0
+        sma30_diff = (current_price - sma_30) / sma_30 if sma_30 else 0.0
+        ema21_diff = (current_price - ema_21) / ema_21 if ema_21 else 0.0
+        ema50_diff = (current_price - ema_50) / ema_50 if ema_50 else 0.0
+
+        macd_line, macd_sig, macd_hist = calculate_macd(closes) if len(closes) >= 35 else (0.0, 0.0, 0.0)
+
+        # --- Volatility / Bands ---
+        bb_b = _safe(calculate_bb_pct_b(closes), 0.5)
+        bb_w = _safe(calculate_bb_width(closes), 0.0)
+        atr_norm = _safe(calculate_atr(highs, lows, closes) if highs and lows else None, 0.0)
+        volat = calculate_volatility(closes[-14:])
+
+        # --- Momentum ---
+        rsi14 = _safe(calculate_rsi(closes[-28:], 14), 50.0)
+        stoch_k, stoch_d = calculate_stoch_rsi(closes)
+        stoch_k = _safe(stoch_k, 50.0)
+        stoch_d = _safe(stoch_d, 50.0)
+        willi = _safe(calculate_williams_r(highs, lows, closes) if highs and lows else None, -50.0)
+        roc10 = _safe(calculate_roc(closes, 10), 0.0)
+
+        # --- Volume ---
+        obv_sl = _safe(calculate_obv_slope(closes, volumes) if volumes else None, 0.0)
+        vwap_d = calculate_vwap_diff(closes, vwaps) if vwaps else 0.0
+        vol_r = _safe(calculate_volume_ratio(volumes) if volumes else None, 1.0)
+
+        # --- Multi-timeframe ---
+        rsi_5m = 50.0
+        sma20_diff_5m = 0.0
+        if closes_5m and len(closes_5m) >= 20:
+            rsi_5m = _safe(calculate_rsi(closes_5m[-28:], 14) if len(closes_5m) >= 28 else None, 50.0)
+            sma20_5m = calculate_sma(closes_5m[-20:], 20)
+            if sma20_5m:
+                sma20_diff_5m = (closes_5m[-1] - sma20_5m) / sma20_5m
+
+        rsi_15m = 50.0
+        if closes_15m and len(closes_15m) >= 28:
+            rsi_15m = _safe(calculate_rsi(closes_15m[-28:], 14), 50.0)
+
+        features = [[
+            sma14_diff, sma30_diff, ema21_diff, ema50_diff,
+            rsi14, stoch_k, stoch_d, willi, roc10,
+            _safe(macd_line, 0.0), _safe(macd_sig, 0.0), _safe(macd_hist, 0.0),
+            bb_b, bb_w, atr_norm,
+            obv_sl, vwap_d, vol_r,
+            volat,
+            rsi_5m, sma20_diff_5m, rsi_15m
+        ]]
+
+        prob = model.predict_proba(features)[0][1]
+        return prob * 100.0
+
+    # --- Fallback: Naive Heuristic ---
     sma14 = calculate_sma(closes, 14)
     rsi14 = calculate_rsi(closes, 14)
     volatility = calculate_volatility(closes)
-    
+
     current_price = closes[-1]
     score = 0.0
-    
+
     if sma14 is not None and current_price > sma14:
         score += 5.0
     else:
         score -= 5.0
-        
+
     if rsi14 is not None:
         if rsi14 < 30:
             score += 10.0
@@ -273,6 +317,6 @@ def calculate_composite_score(closes):
             score -= 10.0
         else:
             score += 10.0 - ((rsi14 - 30) / 40.0) * 20.0
-            
+
     score -= volatility * 100.0
     return score

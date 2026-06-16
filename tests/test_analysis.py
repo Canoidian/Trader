@@ -48,6 +48,28 @@ def test_calculate_composite_score():
     closes_short = [10.0] * 10
     assert calculate_composite_score(closes_short) == 0.0
 
+def test_calculate_composite_score_with_ohlcv():
+    # With all optional data, function should still return a float in [0, 100]
+    # No model loaded in test env, so uses naive fallback — just verify signature works
+    closes = [10.0 + i * 0.01 for i in range(60)]
+    highs = [c + 0.05 for c in closes]
+    lows = [c - 0.05 for c in closes]
+    volumes = [1000.0] * 60
+    vwaps = closes[:]
+
+    score = calculate_composite_score(
+        closes, highs=highs, lows=lows,
+        volumes=volumes, vwaps=vwaps,
+        closes_5m=closes[::5], closes_15m=closes[::15]
+    )
+    assert isinstance(score, float)
+
+def test_calculate_composite_score_backward_compat():
+    # Old call signature still works
+    closes = [10.0] * 35
+    score = calculate_composite_score(closes)
+    assert isinstance(score, float)
+
 from krakentrader.analysis import (
     calculate_ema, calculate_macd,
     calculate_bollinger_bands, calculate_bb_pct_b, calculate_bb_width,
