@@ -8,17 +8,31 @@ import json
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 STATE_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'state.json')
 
-from krakentrader.api import get_balance, create_order, get_historical_ohlcv, get_tradable_pairs, get_ticker
+import krakentrader.api as _kraken_api
+from krakentrader.api import (
+    get_balance, create_order, get_historical_ohlcv,
+    get_historical_ohlcv_interval, get_tradable_pairs, get_ticker
+)
 from krakentrader.analysis import calculate_composite_score
+from krakentrader.regime import get_market_regime
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-TRADE_FRACTION = 0.95    
-MIN_TRADE_AMOUNT_USD = 5.0 
+MIN_TRADE_AMOUNT_USD = 5.0
 MAX_CONCURRENT_TRADES = 3
-TRAILING_STOP_PCT = 0.03 # 3.0% trailing stop loss
-MAX_HOLD_HOURS = 6.0     # Maximum hours to hold a trade
-POLL_INTERVAL = 30       
+TRAILING_STOP_PCT = 0.03
+MAX_HOLD_HOURS = 6.0
+POLL_INTERVAL = 30
+SAMPLE_PAIRS = 30
+
+def confidence_to_fraction(score: float) -> float:
+    if score >= 90:
+        return 0.95
+    if score >= 80:
+        return 0.80
+    if score >= 70:
+        return 0.65
+    return 0.40
 
 def load_state():
     if os.path.exists(STATE_FILE):
@@ -138,38 +152,66 @@ def run_loop():
                 
                 # STEP 3: MARKET RESEARCH
                 if usable_assets:
+                    regime, buy_threshold = get_market_regime(_kraken_api)
+
                     quote_currencies = [a['asset'] for a in usable_assets]
                     tradable_pairs_dict = get_tradable_pairs(quote_currencies)
                     all_pairs = list(tradable_pairs_dict.keys())
+
                     if all_pairs:
-                        sample_pairs = random.sample(all_pairs, min(10, len(all_pairs)))
-                        
+                        sample_pairs = random.sample(all_pairs, min(SAMPLE_PAIRS, len(all_pairs)))
+
                         best_pair = None
                         best_score = -9999
                         best_price = 0
                         best_quote_asset = None
-                        
+
                         for pair in sample_pairs:
                             try:
                                 ohlcv = get_historical_ohlcv(pair)
-                                if not ohlcv or len(ohlcv) < 15: continue
+                                if not ohlcv or len(ohlcv) < 35:
+                                    continue
                                 closes = [float(row[4]) for row in ohlcv]
-                                score = calculate_composite_score(closes)
+                                highs = [float(row[2]) for row in ohlcv]
+                                lows = [float(row[3]) for row in ohlcv]
+                                volumes = [float(row[6]) for row in ohlcv]
+                                vwaps = [float(row[5]) for row in ohlcv]
+
+                                closes_5m, closes_15m = None, None
+                                try:
+                                    ohlcv_5m = get_historical_ohlcv_interval(pair, 5)
+                                    closes_5m = [float(r[4]) for r in ohlcv_5m] if ohlcv_5m else None
+                                except Exception:
+                                    pass
+                                try:
+                                    ohlcv_15m = get_historical_ohlcv_interval(pair, 15)
+                                    closes_15m = [float(r[4]) for r in ohlcv_15m] if ohlcv_15m else None
+                                except Exception:
+                                    pass
+
+                                score = calculate_composite_score(
+                                    closes, highs=highs, lows=lows,
+                                    volumes=volumes, vwaps=vwaps,
+                                    closes_5m=closes_5m, closes_15m=closes_15m
+                                )
                                 if score > best_score:
                                     best_score = score
                                     best_pair = pair
                                     best_price = closes[-1]
                                     best_quote_asset = tradable_pairs_dict[pair]
-                            except:
+
+                                time.sleep(0.05)
+                            except Exception:
                                 pass
-                                
-                        if best_score > 65.0 and best_quote_asset:
+
+                        if best_score > buy_threshold and best_quote_asset:
                             # STEP 4: BUY
                             asset_info = next(a for a in usable_assets if a['asset'] == best_quote_asset)
-                            trade_amount = asset_info['amount'] * TRADE_FRACTION
+                            trade_fraction = confidence_to_fraction(best_score)
+                            trade_amount = asset_info['amount'] * trade_fraction
                             volume = trade_amount / best_price
-                            
-                            logging.info(f"[BUY] ML Predicts {best_score:.1f}% pump probability! Using {trade_amount:.6f} {best_quote_asset} to buy {best_pair}")
+
+                            logging.info(f"[BUY] {regime} regime | Score {best_score:.1f}% | Threshold {buy_threshold}% | Sizing {trade_fraction*100:.0f}% | Using {trade_amount:.6f} {best_quote_asset} to buy {best_pair}")
                             try:
                                 create_order(best_pair, 'buy', 'market', volume)
                                 open_positions.append({
